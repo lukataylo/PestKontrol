@@ -58,38 +58,67 @@ effect(() => {
 });
 
 const detector = new Detector(ingest);
+// iOS Safari won't play (or hand frames from) a <video> that isn't in the page,
+// so the analysis video lives in the DOM, invisible.
 const hidden = document.createElement('video');
 hidden.muted = true;
 hidden.playsInline = true;
+hidden.autoplay = true;
 hidden.setAttribute('playsinline', '');
+hidden.setAttribute('muted', '');
+hidden.setAttribute('aria-hidden', 'true');
+Object.assign(hidden.style, { position: 'fixed', left: '0', top: '0', width: '2px', height: '2px', opacity: '0', pointerEvents: 'none' });
+document.body.appendChild(hidden);
 
 let streak = 0, streakSpecies = null, cooldownUntil = 0, holdUntil = 0;
 let lastMoment = 0, lastPrune = 0;
 const ruleLast = {};
 let wakeLock = null;
 
-export async function start() {
-  if (running.value) return;
+let starting = null;
+
+/// Opens the camera. Only getUserMedia failing counts as "no camera";
+/// playback, recording and wake-lock problems are worked around.
+export function start() {
+  if (running.value) return Promise.resolve();
+  starting ??= open().finally(() => (starting = null));
+  return starting;
+}
+
+async function open() {
+  let s;
   try {
-    const s = await navigator.mediaDevices.getUserMedia({
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.isSecureContext ? 'This browser has no camera access.' : 'Camera needs https.');
+    s = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15, max: 30 } },
       audio: false,
-    });
-    stream.value = s;
-    hidden.srcObject = s;
-    await hidden.play();
-    const track = s.getVideoTracks()[0];
-    torchSupported.value = !!track.getCapabilities?.().torch;
-    detector.start(hidden);
-    recorder.start(s);
-    running.value = true;
-    cameraError.value = null;
-    status.value = { kind: 'idle' };
-    persist();
-    keepAwake();
+    }).catch(() => navigator.mediaDevices.getUserMedia({ video: true, audio: false }));
   } catch (e) {
     cameraError.value = e?.name === 'NotAllowedError' ? 'denied' : (e?.message ?? 'camera unavailable');
+    return;
   }
+  stream.value = s;
+  cameraError.value = null;
+  running.value = true;
+  status.value = { kind: 'idle' };
+  hidden.srcObject = s;
+  try {
+    await hidden.play();
+  } catch {
+    // Autoplay refused: retry on the next tap anywhere.
+    document.addEventListener('pointerdown', () => hidden.play().catch(() => {}), { once: true });
+  }
+  const track = s.getVideoTracks()[0];
+  try { torchSupported.value = !!track.getCapabilities?.().torch; } catch { torchSupported.value = false; }
+  detector.start(hidden);
+  try { recorder.start(s); } catch (e) { console.warn('recording unavailable', e); }
+  persist();
+  keepAwake();
+  track.addEventListener('ended', () => {
+    running.value = false;
+    stream.value = null;
+    status.value = { kind: 'offline' };
+  });
 }
 
 async function keepAwake() {
@@ -254,6 +283,7 @@ async function notify(title, body) {
 export function mood(st, isArmed, slasherTheme) {
   switch (st.kind) {
     case 'offline': return 'dead';
+    case 'blocked': return 'sleepy';
     case 'idle': return slasherTheme && isArmed ? 'happy' : 'idle';
     case 'dark': return 'sleepy';
     case 'tracking': return 'suspicious';
@@ -271,6 +301,7 @@ export function line(st, isArmed, slasherTheme) {
   if (slasherTheme) {
     switch (st.kind) {
       case 'offline': return 'Camera off';
+      case 'blocked': return 'Let me see';
       case 'loading': return 'Waking up...';
       case 'idle': return isArmed ? 'All clear' : 'Camera ready';
       case 'dark': return 'Too dark. Lamp?';
@@ -283,7 +314,8 @@ export function line(st, isArmed, slasherTheme) {
     }
   }
   switch (st.kind) {
-    case 'offline': return 'Camera off.';
+    case 'offline': return 'Camera off. Tap start.';
+    case 'blocked': return 'I need the camera.';
     case 'loading': return 'Waking up...';
     case 'idle': return isArmed ? 'All clear. Armed.' : 'All clear. Tap arm to scare.';
     case 'dark': return 'Too dark. Lamp?';

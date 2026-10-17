@@ -10,6 +10,7 @@ import { load } from '../theme.js';
 
 export function botState() {
   const m = model.value;
+  if (S.cameraError.value) return { kind: 'blocked' };
   if (S.running.value && m.phase !== 'ready') return { kind: 'loading' };
   return S.status.value;
 }
@@ -136,7 +137,7 @@ function Viewport() {
           {S.cameraError.value ? (
             <div class="stack" style={{ alignItems: 'center' }}>
               <DotText text="NO CAMERA" pitch={3.5} />
-              <p class="body">{S.cameraError.value === 'denied' ? 'Allow camera access for this site in your browser settings, then reload.' : S.cameraError.value}</p>
+              <p class="body">{S.cameraError.value === 'denied' ? cameraHelp() : S.cameraError.value}</p>
               <button class="chip ink" onClick={S.start}>Try again</button>
             </div>
           ) : (
@@ -196,4 +197,16 @@ function Controls() {
         onClick={() => { navigator.vibrate?.(20); S.setArmed(!S.armed.value); }} />
     </div>
   );
+}
+
+/// Where to re-allow the camera, by platform.
+function cameraHelp() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) {
+    return navigator.standalone
+      ? 'Camera is blocked. Open Settings → SHOO (or Safari) → Camera → Allow, then reopen SHOO.'
+      : 'Camera is blocked. Tap ᴀA in the address bar → Website Settings → Camera → Allow, then try again.';
+  }
+  if (/Android/.test(ua)) return 'Camera is blocked. Tap the icon left of the address → Permissions → Camera → Allow, then try again.';
+  return 'Camera is blocked. Click the icon left of the address → allow Camera, then try again.';
 }
