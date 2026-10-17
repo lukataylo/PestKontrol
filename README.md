@@ -2,6 +2,22 @@
 
 Turns a spare iPhone into a pest sentry. It watches through the camera, identifies the animal on-device and plays a deterrent chosen for that species. Every visit is logged with a snapshot. It makes no network calls and has no cloud.
 
+## Web app (PWA)
+
+Live at **https://shoo-web-production.up.railway.app**. Open it on any phone, then Share → Add to Home Screen.
+
+The code is in `web/` (Preact + Vite). Detection is **MobileCLIP-S0** running in the browser through transformers.js: WebGPU in fp16, or WASM in fp32. The int8 vision model is broken, so it isn't used. The model and the ONNX runtime are served from our own origin, so nothing loads from a third party and nothing is uploaded.
+
+- Zero-shot classes use prompt ensembles plus 20 background prompts, with a per-region **novelty gate** so ledges and rooftops don't read as pigeons.
+- Search embeds the query and compares it with stored frame embeddings in IndexedDB. Footage is rolling MediaRecorder segments in private browser storage (OPFS).
+- Ask uses Chrome's built-in on-device model when present, and otherwise a summary.
+
+```sh
+cd web && npm install && npm run dev     # https needed on phones for camera
+npm run preview                          # production build + server.js
+railway up --service shoo-web            # deploy (project: shoo)
+```
+
 ## Run
 
 ```sh
