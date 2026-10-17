@@ -102,11 +102,13 @@ final class VideoRecorder {
         i.expectsMediaDataInRealTime = true
         guard w.canAdd(i) else { return }
         w.add(i)
+        // The adaptor must exist before writing starts, or AVFoundation throws.
+        let a = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: i, sourcePixelBufferAttributes: nil)
         guard w.startWriting() else { return }
         w.startSession(atSourceTime: time)
         writer = w
         input = i
-        adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: i, sourcePixelBufferAttributes: nil)
+        adaptor = a
         segmentStart = time
     }
 
