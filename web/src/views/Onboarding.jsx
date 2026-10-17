@@ -6,6 +6,7 @@ import { loadModel, model, PESTS } from '../detector.js';
 import * as S from '../sentry.js';
 import { PetGrid, Friends, ModePicker } from './Config.jsx';
 import { Caption, Panel, Title } from '../ui.jsx';
+import { EngineCard } from './Engine.jsx';
 import { slasher } from '../theme.js';
 
 /// Chrome/Android/desktop hand us an install prompt we can trigger from a button.
@@ -104,7 +105,7 @@ function Welcome() {
     <div class="stack welcome" style={{ gap: '16px' }}>
       <Panel seed={3} splat={sl ? 'br' : null} radius="28px">
         <div class="stack" style={{ gap: '16px' }}>
-          <BotFace mood="happy" />
+          <div class="face"><BotFace mood="happy" /></div>
           <BotSpeech text="Hi. I'm Shoo." pitch={3.2} max={18} />
         </div>
       </Panel>
@@ -139,15 +140,7 @@ function Welcome() {
         </div>
       </Panel>
 
-      <div class="stack" style={{ gap: '8px' }}>
-        <Caption>
-          {m.phase === 'ready' ? 'Brain ready · works offline from now on'
-            : m.phase === 'error' ? `Model failed: ${m.error}`
-            : m.progress >= 0.99 ? 'Downloaded · warming up the brain…'
-            : `Downloading the on-device brain · ${Math.round(m.progress * 100)}% of ~70 MB`}
-        </Caption>
-        <div class="progress"><i style={{ width: `${(m.phase === 'ready' ? 1 : m.progress) * 100}%` }} /></div>
-      </div>
+      <Panel seed={12}><EngineCard compact /></Panel>
     </div>
   );
 }

@@ -1,20 +1,66 @@
 import { useState } from 'preact/hooks';
 import { DotText, Glyph, Pet } from '../dot.jsx';
 import { PESTS, FRIENDS, model } from '../detector.js';
-import { PATTERNS } from '../sound.js';
+import { PATTERNS, SOUND_INFO, VOICES } from '../sound.js';
 import * as S from '../sentry.js';
 import { THEMES, theme, slasher, load, save, grainURL } from '../theme.js';
 import { Caption, Card, Panel, Stepper, Title, Toggle } from '../ui.jsx';
+import { EngineCard } from './Engine.jsx';
+
+/// Pick a pest's sound: every option with a one-line description and a preview.
+export function SoundSheet({ species, close }) {
+  const current = S.patternFor(species);
+  const choose = (k) => {
+    S.settings.value = { ...S.settings.value, patterns: { ...S.settings.value.patterns, [species]: k } };
+    S.test(k);
+  };
+  return (
+    <div class="sheet" role="dialog" aria-label={`Sound for ${species}`}>
+      <div class="stack">
+        <div class="row">
+          <Pet kind={species} pitch={3} />
+          <DotText text={`${species} SOUND`} pitch={3} />
+          <span class="spacer" />
+          <button class="close" onClick={close} aria-label="Done">✕</button>
+        </div>
+        <p class="body" style={{ fontSize: '13px' }}>Tap to choose and hear it. Turn the volume up.</p>
+        {PATTERNS.map((k) => {
+          const info = SOUND_INFO[k];
+          const on = k === current;
+          return (
+            <Panel key={k} class="listrow" radius="18px" style={{ padding: '12px 14px', ...(on ? { borderColor: 'var(--red)' } : null) }}
+              seed={k.length * 13} onClick={() => choose(k)}>
+              <div class="row" style={{ gap: '14px', width: '100%' }}>
+                <span class={`radio ${on ? 'on' : ''}`} aria-hidden="true" />
+                <div class="stack" style={{ gap: '6px', flex: 1 }}>
+                  <div class="row" style={{ gap: '8px' }}>
+                    <DotText text={info.name} pitch={2.4} />
+                    {info.high && <span class="chip" style={{ padding: '3px 7px' }}>High-pitched</span>}
+                  </div>
+                  <span class="blurb">{info.text}</span>
+                </div>
+                <button class="round" style={{ width: '40px', height: '40px' }} aria-label={`Preview ${info.name}`}
+                  onClick={(e) => { e.stopPropagation(); S.test(k); }}>
+                  <Glyph name="play" pitch={2} />
+                </button>
+              </div>
+            </Panel>
+          );
+        })}
+        <button class="primary press" onClick={close}><DotText text="DONE" pitch={3} color="#000000" /></button>
+      </div>
+    </div>
+  );
+}
 
 export function PetGrid({ showSound = true }) {
   const s = S.settings.value;
+  const [picking, setPicking] = useState(null);
   const set = (patch) => (S.settings.value = { ...s, ...patch });
   const toggle = (p) => set({ enabled: s.enabled.includes(p) ? s.enabled.filter((x) => x !== p) : [...s.enabled, p] });
   const cycle = (p, e) => {
     e.stopPropagation();
-    const next = PATTERNS[(PATTERNS.indexOf(S.patternFor(p)) + 1) % PATTERNS.length];
-    set({ patterns: { ...s.patterns, [p]: next } });
-    S.test(next);
+    setPicking(p);
   };
   const sl = slasher();
   return (
@@ -22,8 +68,8 @@ export function PetGrid({ showSound = true }) {
       {PESTS.map((p) => {
         const on = s.enabled.includes(p);
         const chip = showSound && (
-          <button class="chip" style={{ alignSelf: 'flex-start', opacity: on ? 1 : 0.4 }} onClick={(e) => cycle(p, e)} aria-label={`Sound ${S.patternFor(p)}. Tap to change and preview.`}>
-            <Glyph name="wave" pitch={1.5} />{S.patternFor(p)}
+          <button class="chip" style={{ alignSelf: 'flex-start', opacity: on ? 1 : 0.4 }} onClick={(e) => cycle(p, e)} aria-label={`Sound ${S.patternFor(p)}. Tap to choose.`}>
+            <Glyph name="wave" pitch={1.5} />{SOUND_INFO[S.patternFor(p)]?.name ?? S.patternFor(p)}<span aria-hidden="true" style={{ opacity: 0.6 }}>▾</span>
           </button>
         );
         return sl ? (
@@ -55,6 +101,7 @@ export function PetGrid({ showSound = true }) {
           </svg>
         </Panel>
       )}
+      {picking && <SoundSheet species={picking} close={() => setPicking(null)} />}
     </div>
   );
 }
@@ -193,12 +240,13 @@ export function Config() {
           )}
         </Card>
 
+        <Card><EngineCard /></Card>
         <Card>
           <div class="row">
-            <Glyph name="eye" pitch={3} />
+            <Glyph name="lock" pitch={3} />
             <div class="stack" style={{ gap: '6px' }}>
               <DotText text="ON-DEVICE" pitch={2.4} />
-              <Caption>MobileCLIP · {m.device ?? 'loading'} · no uploads</Caption>
+              <Caption>MobileCLIP · nothing uploaded</Caption>
             </div>
           </div>
           <div class="row">
@@ -206,7 +254,8 @@ export function Config() {
             <span class="spacer" />
             <Toggle on={debug} label="Show raw labels" onChange={(on) => { setDebug(on); save('shoo.debug', on); }} />
           </div>
-          <div class="row" style={{ gap: '8px' }}>
+          <Caption>Hear every sound</Caption>
+          <div class="row" style={{ gap: '8px', flexWrap: 'wrap' }}>
             {PATTERNSButtons()}
           </div>
           <button class="chip" style={{ alignSelf: 'flex-start' }} onClick={() => (S.onboarded.value = false)}>Replay intro</button>
@@ -217,6 +266,6 @@ export function Config() {
 }
 
 const PATTERNSButtons = () =>
-  ['hawk', 'clap', 'sweep', 'pulse'].map((p) => (
+  VOICES.map((p) => (
     <button key={p} class="chip press" onClick={() => S.test(p)} aria-label={`Play ${p}`}><Glyph name="play" pitch={1.5} />{p}</button>
   ));

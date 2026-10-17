@@ -1,7 +1,7 @@
 // The brain, ported from the iOS Sentry: confirms detections over frames,
 // respects safety + cooldown + quiet hours, deters, logs, indexes, runs rules.
 import { signal, computed, effect } from '@preact/signals';
-import { Detector, DARK_LUMA, PESTS } from './detector.js';
+import { Detector, DARK_LUMA, PESTS, model } from './detector.js';
 import { Recorder } from './recorder.js';
 import { add, pruneBefore, persist } from './store.js';
 import { play, unlockAudio } from './sound.js';
@@ -14,11 +14,12 @@ export const MODES = {
   fierce: { label: 'FIERCE', blurb: 'Acts fast. Loud and often.', level: 3, tuning: { threshold: 0.3, confirm: 2, cooldown: 20, gain: 1 } },
 };
 
-export const DEFAULT_PATTERN = { pigeon: 'hawk', gull: 'hawk', fox: 'clap', rat: 'sweep', squirrel: 'pulse' };
+// All defaults are audible; the high-pitched ones are opt-in.
+export const DEFAULT_PATTERN = { pigeon: 'hawk', gull: 'hawk', fox: 'bark', rat: 'siren', squirrel: 'clap', movement: 'mix' };
 
 const defaults = {
   enabled: [...PESTS], patterns: {}, mode: 'steady', custom: MODES.steady.tuning,
-  protectLock: true, quietHours: false, quietStart: 22, quietEnd: 7,
+  protectLock: true, quietHours: false, quietStart: 22, quietEnd: 7, motionScare: false,
 };
 
 export const settings = signal({ ...defaults, ...load('shoo.settings', {}) });
@@ -154,6 +155,10 @@ function rest(now, f) {
 }
 
 function ingest(f) {
+  // Basic mode: no AI on this device, so movement itself is the "pest" if the user opted in.
+  if (model.value.phase === 'error' && settings.value.motionScare && f.moving) {
+    f = { ...f, species: 'movement', confidence: 1 };
+  }
   frame.value = f;
   const now = Date.now();
   const t = tuning.value;
@@ -171,7 +176,7 @@ function ingest(f) {
   }
 
   const sp = f.species;
-  if (!sp || f.confidence < t.threshold || !s.enabled.includes(sp)) {
+  if (!sp || f.confidence < t.threshold || (sp !== 'movement' && !s.enabled.includes(sp))) {
     streak = Math.max(0, streak - 1);
     if (now >= holdUntil) status.value = rest(now, f);
     return;

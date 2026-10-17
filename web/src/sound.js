@@ -2,14 +2,29 @@
 // learn a fixed pattern. Ported from the iOS Synth.
 
 const RATE = 48000;
-export const VOICES = ['hawk', 'clap', 'sweep', 'pulse'];
+export const VOICES = ['hawk', 'bark', 'siren', 'shout', 'clap', 'sweep', 'pulse'];
 export const PATTERNS = [...VOICES, 'mix'];
+
+/// What each sound is, for the picker. High ones are real but most adults can't hear them.
+export const SOUND_INFO = {
+  hawk: { name: 'HAWK', text: 'Raptor screech. Birds fear it.' },
+  bark: { name: 'BARK', text: 'Big dog barking. Works on foxes and cats.' },
+  siren: { name: 'SIREN', text: 'Rising alarm. Loud and startling.' },
+  shout: { name: 'SHOUT', text: 'Harsh human-like "hey!" bursts.' },
+  clap: { name: 'CLAP', text: 'Sharp claps at random gaps.' },
+  sweep: { name: 'SWEEP', text: 'High chirps, 15–20 kHz. You may not hear it.', high: true },
+  pulse: { name: 'PULSE', text: 'High beeps, 17–19 kHz. You may not hear it.', high: true },
+  mix: { name: 'MIX', text: 'A different audible sound each time.' },
+};
+const AUDIBLE = ['hawk', 'bark', 'siren', 'shout', 'clap'];
 
 let ctx;
 let current;
 
 /// Must be called from a tap — browsers only allow audio after a gesture.
 export function unlockAudio() {
+  // iOS mutes Web Audio with the silent switch unless the session is "playback".
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* older Safari */ }
   ctx ??= new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RATE });
   if (ctx.state === 'suspended') ctx.resume();
 }
@@ -29,6 +44,52 @@ function hawk(out) {
       out.push((Math.sin(ph) + 0.35 * Math.sin(2 * ph) + 0.15 * Math.sin(3 * ph) + 0.12 * rand(-1, 1)) * env);
     }
     silence(out, rand(0.12, 0.35));
+  }
+}
+
+/// Two or three deep barks: harmonic voice with a falling pitch plus breath noise.
+function bark(out) {
+  for (let c = randInt(2, 3); c > 0; c--) {
+    const dur = rand(0.16, 0.24), n = Math.floor(dur * RATE);
+    const f0 = rand(420, 560), f1 = f0 * rand(0.55, 0.7);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / RATE, x = t / dur;
+      ph += (2 * Math.PI * (f0 + (f1 - f0) * x)) / RATE;
+      const env = Math.min(1, t / 0.008) * (1 - x) ** 1.6;
+      out.push((0.6 * Math.sin(ph) + 0.35 * Math.sin(2 * ph) + 0.25 * Math.sin(3 * ph) + 0.15 * Math.sin(5 * ph) + 0.35 * rand(-1, 1)) * env);
+    }
+    silence(out, rand(0.12, 0.28));
+  }
+}
+
+/// Wailing alarm sweeping 700–1600 Hz.
+function siren(out) {
+  const dur = rand(1.8, 2.6), n = Math.floor(dur * RATE), rate = rand(1.2, 2.2);
+  let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / RATE;
+    ph += (2 * Math.PI * (1150 + 450 * Math.sin(2 * Math.PI * rate * t))) / RATE;
+    const env = Math.min(1, t / 0.05, (dur - t) / 0.08);
+    out.push((Math.sin(ph) + 0.4 * Math.sin(2 * ph) + 0.2 * Math.sign(Math.sin(ph))) * env);
+  }
+}
+
+/// Short harsh vowel bursts, roughly a shouted "hey!".
+function shout(out) {
+  for (let c = randInt(2, 3); c > 0; c--) {
+    const dur = rand(0.28, 0.4), n = Math.floor(dur * RATE), f0 = rand(190, 260);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / RATE, x = t / dur;
+      ph += (2 * Math.PI * f0 * (1 + 0.25 * x)) / RATE;
+      // Buzzy source shaped by two rough formants (~700 Hz and ~1800 Hz).
+      const src = Math.sin(ph) + 0.5 * Math.sin(2 * ph) + 0.33 * Math.sin(3 * ph);
+      const formant = 0.6 * Math.sin(ph * (700 / f0)) + 0.35 * Math.sin(ph * (1800 / f0));
+      const env = Math.min(1, t / 0.02) * (1 - x) ** 0.8;
+      out.push((src * 0.5 + formant * 0.6 + 0.1 * rand(-1, 1)) * env);
+    }
+    silence(out, rand(0.15, 0.3));
   }
 }
 
@@ -70,9 +131,9 @@ function silence(out, s) {
 /// Plays a pattern and returns the voice actually used (resolves "mix").
 export function play(pattern, gain = 0.9) {
   unlockAudio();
-  const voice = pattern === 'mix' ? VOICES[randInt(0, 3)] : pattern;
+  const voice = pattern === 'mix' ? AUDIBLE[randInt(0, AUDIBLE.length - 1)] : (VOICES.includes(pattern) ? pattern : 'hawk');
   const out = [];
-  ({ hawk, clap, sweep, pulse })[voice](out);
+  ({ hawk, bark, siren, shout, clap, sweep, pulse })[voice](out);
   const peak = out.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
   const buf = ctx.createBuffer(1, out.length, RATE);
   const ch = buf.getChannelData(0);

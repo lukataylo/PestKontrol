@@ -1,36 +1,51 @@
 // Main-thread side of detection: motion, region scheduling, novelty gating,
 // tile memory, thumbnails. The model itself runs in detector.worker.js.
 import { signal } from '@preact/signals';
+import { load, save } from './theme.js';
 
 export const PESTS = ['pigeon', 'gull', 'fox', 'rat', 'squirrel'];
 export const FRIENDS = ['person', 'cat', 'dog', 'hedgehog'];
 export const DARK_LUMA = 0.08;
 
-export const model = signal({ phase: 'idle', progress: 0, device: null, error: null });
+/// phase: idle | loading | ready | error. `engine` is the user's choice: auto | gpu | cpu.
+export const model = signal({ phase: 'idle', progress: 0, device: null, error: null, engine: load('shoo.engine', 'auto') });
 
-const worker = new Worker(new URL('./detector.worker.js', import.meta.url), { type: 'module' });
+let worker = null;
 const pending = new Map();
 let nextId = 1;
-const files = {};
+let files = {};
 
-worker.onmessage = ({ data }) => {
-  if (data.type === 'progress') {
-    files[data.file] = [data.loaded, data.total];
-    const [l, t] = Object.values(files).reduce(([a, b], [x, y]) => [a + x, b + y], [0, 0]);
-    model.value = { ...model.value, phase: 'loading', progress: t ? l / t : 0 };
-  } else if (data.type === 'ready') {
-    model.value = { phase: 'ready', progress: 1, device: data.device, error: null };
-  } else if (data.type === 'error' && !data.id) {
-    model.value = { ...model.value, phase: 'error', error: data.message };
-  }
-  const p = pending.get(data.id);
-  if (p) {
-    pending.delete(data.id);
-    data.type === 'error' ? p.reject(new Error(data.message)) : p.resolve(data);
-  }
-};
+function makeWorker() {
+  worker?.terminate();
+  for (const p of pending.values()) p.reject(new Error('engine restarted'));
+  pending.clear();
+  files = {};
+  worker = new Worker(new URL('./detector.worker.js', import.meta.url), { type: 'module' });
+  worker.onerror = (e) => fail(`worker crashed: ${e.message || 'unknown error'}`);
+  worker.onmessage = ({ data }) => {
+    if (data.type === 'progress') {
+      files[data.file] = [data.loaded, data.total];
+      const [l, t] = Object.values(files).reduce(([a, b], [x, y]) => [a + x, b + y], [0, 0]);
+      model.value = { ...model.value, phase: 'loading', progress: t ? l / t : 0 };
+    } else if (data.type === 'attempt') {
+      model.value = { ...model.value, trying: data.device === 'webgpu' ? 'GPU' : `CPU×${data.threads}` };
+    } else if (data.type === 'ready') {
+      model.value = { ...model.value, phase: 'ready', progress: 1, device: data.device, error: null };
+    }
+    const p = pending.get(data.id);
+    if (p) {
+      pending.delete(data.id);
+      data.type === 'error' ? p.reject(new Error(data.message)) : p.resolve(data);
+    }
+  };
+}
+
+function fail(message) {
+  model.value = { ...model.value, phase: 'error', error: message };
+}
 
 function call(msg, transfer = []) {
+  if (!worker) makeWorker();
   const id = nextId++;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
@@ -38,11 +53,39 @@ function call(msg, transfer = []) {
   });
 }
 
-export function loadModel() {
-  if (model.value.phase === 'idle') {
-    model.value = { ...model.value, phase: 'loading' };
-    call({ type: 'init' }).catch((e) => (model.value = { ...model.value, phase: 'error', error: e.message }));
+/// Downloads (first time) and starts the on-device model. On failure, retries once
+/// in a fresh worker on the safest engine — single-threaded CPU.
+export async function loadModel({ force = false } = {}) {
+  const m = model.value;
+  if (!force && m.phase !== 'idle') return;
+  model.value = { ...m, phase: 'loading', progress: 0, error: null };
+  makeWorker();
+  const errors = [];
+  const ladders = m.engine === 'cpu' ? [{ engine: 'cpu', threads: 1 }] : [{ engine: m.engine }, { engine: 'cpu', threads: 1 }];
+  for (const options of ladders) {
+    try {
+      await call({ type: 'init', options });
+      return;
+    } catch (e) {
+      errors.push(e.message);
+      makeWorker();
+    }
   }
+  fail(errors.join(' | '));
+}
+
+/// The "Install AI engine" / retry button. `clearCache` re-downloads the model files.
+export async function installModel({ engine, clearCache = false } = {}) {
+  if (engine) {
+    save('shoo.engine', engine);
+    model.value = { ...model.value, engine };
+  }
+  if (clearCache) {
+    try {
+      for (const k of await caches.keys()) if (/transformers/.test(k)) await caches.delete(k);
+    } catch { /* no Cache API */ }
+  }
+  return loadModel({ force: true });
 }
 
 /// Text → embedding, for plain-language search.
@@ -129,7 +172,11 @@ export class Detector {
 
   async step() {
     const v = this.video;
-    if (this.busy || model.value.phase !== 'ready' || !v || v.readyState < 2 || v.videoWidth === 0) return;
+    if (this.busy || !v || v.readyState < 2 || v.videoWidth === 0) return;
+    if (model.value.phase !== 'ready') {
+      if (model.value.phase === 'error') this.basic();
+      return;
+    }
     if (performance.now() - (this.lastRun ?? 0) < this.interval) return;
     this.busy = true;
     this.lastRun = performance.now();
@@ -143,6 +190,26 @@ export class Detector {
       this.onFrame(await this.combine(results, regions, moving, luma));
     } catch (e) {
       console.warn('detect', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /// Basic mode when the AI can't run here: movement, brightness and thumbnails only.
+  async basic() {
+    if (performance.now() - (this.lastRun ?? 0) < this.interval) return;
+    this.busy = true;
+    this.lastRun = performance.now();
+    try {
+      const { box, luma } = this.motion();
+      const frame = { species: null, confidence: 0, guarded: null, guardedConfidence: 0, box, moving: !!box, luma, labels: {}, at: new Date() };
+      const now = performance.now();
+      if (now - this.lastThumb >= (box ? 1000 : 10000)) {
+        this.lastThumb = now;
+        frame.thumb = await this.grab(320, 0.55);
+      }
+      if (box) frame.snapshot = frame.thumb ?? (await this.grab(320, 0.55));
+      this.onFrame(frame);
     } finally {
       this.busy = false;
     }

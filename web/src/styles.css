@@ -338,8 +338,65 @@ input.hook { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid 
 .dotsbar i.on { width: 20px; background: var(--red); }
 
 .speech { display: flex; flex-direction: column; }
+.radio { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--ghost); flex: none; position: relative; }
+.radio.on { border-color: var(--red); }
+.radio.on::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--red); }
+.sheet .listrow { cursor: pointer; }
+.errbox {
+  font-size: 11px; line-height: 1.5; color: var(--dim); max-height: 96px; overflow: auto;
+  padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--ink) 6%, transparent); word-break: break-word;
+}
+.engine-over {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 14px; border-radius: 20px;
+  background: color-mix(in srgb, var(--black) 88%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  max-height: calc(100% - 24px); overflow: auto;
+}
 .hourchart { width: 100%; height: 70px; display: block; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ---------- Adaptive layout ---------- */
+
+.shell, .onboard { height: 100vh; height: 100dvh; }
+
+/* The bot face scales with screen height so the camera keeps its room. */
+.face { width: min(100%, calc(clamp(84px, 19dvh, 200px) * 29 / 13)); margin: 0 auto; }
+
+/* Dot-matrix text shrinks instead of overflowing on narrow screens. */
+canvas[role='img'] { max-width: 100%; height: auto !important; }
+
+.logo { height: clamp(62px, 25vw, 104px); }
+.slasher-title { font-size: clamp(56px, 21vw, 92px); }
+
+@media (max-width: 360px) {
+  .screen { padding: 0 12px 12px; }
+  .round { width: 48px; height: 48px; }
+  .round.big { width: 56px; height: 56px; }
+  .tabbar { margin-left: 12px; margin-right: 12px; }
+  .panel { padding: 14px; }
+  .onboard { padding-left: 16px; padding-right: 16px; }
+  .grid2 { gap: 8px; }
+  .lede { font-size: 15px; }
+}
+
+@media (max-height: 700px) {
+  .shell { padding-top: calc(var(--safe-top) + 4px); }
+  .screen.fixed { gap: 8px; }
+  .screen.fixed > .panel { padding: 12px 14px; }
+  .tabbar button { padding: 10px 0 6px; }
+  .primary { height: 52px; }
+  .onboard .pages { gap: 16px; }
+}
+
+@media (min-height: 900px) {
+  .screen.fixed { gap: 16px; }
+}
+
+/* Tablets and desktops: a roomier centred column. */
+@media (min-width: 600px) {
+  .shell { max-width: 620px; }
+  .onboard { max-width: 620px; margin: 0 auto; }
+  .screen { padding: 0 24px 24px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

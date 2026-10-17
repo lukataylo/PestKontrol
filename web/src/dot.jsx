@@ -66,4 +66,4 @@ export function Dots({ rows, pitch = 3, color, accent, ghost = false, dim = fals
 
 export const DotText = ({ text, pitch = 3, ...rest }) => <Dots rows={textRows(text)} pitch={pitch} label={String(text)} {...rest} />;
 export const Glyph = ({ name, pitch = 2.6, ...rest }) => <Dots rows={GLYPHS[name]} pitch={pitch} {...rest} />;
-export const Pet = ({ kind, pitch = 3, ...rest }) => <Dots rows={PETS[kind]} pitch={pitch} {...rest} />;
+export const Pet = ({ kind, pitch = 3, ...rest }) => <Dots rows={PETS[kind] ?? GLYPHS.eye} pitch={pitch} {...rest} />;

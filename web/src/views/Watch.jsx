@@ -7,6 +7,7 @@ import { all, revision } from '../store.js';
 import { clock, pal, slasher } from '../theme.js';
 import { Panel, Pulse, RoundButton, Title, Splatter, Chip } from '../ui.jsx';
 import { load } from '../theme.js';
+import { EngineCard } from './Engine.jsx';
 
 export function botState() {
   const m = model.value;
@@ -28,7 +29,7 @@ export function Watch() {
       <Header />
       <Panel seed={5} splat={sl ? 'br' : null} radius="28px" style={mood === 'angry' && !sl ? { borderColor: 'var(--red)', borderWidth: '2px' } : null}>
         <div class="stack" style={{ gap: '16px' }}>
-          <BotFace mood={mood} gaze={gaze} />
+          <div class="face"><BotFace mood={mood} gaze={gaze} /></div>
           <BotSpeech text={S.line(st, S.armed.value, sl)} />
         </div>
       </Panel>
@@ -146,10 +147,7 @@ function Viewport() {
         </div>
       )}
       {S.running.value && m.phase !== 'ready' && (
-        <div style={{ position: 'absolute', left: '16px', right: '16px', bottom: '16px' }} class="stack">
-          <span class="caption">{m.phase === 'error' ? `Model failed: ${m.error}` : `Loading on-device model · ${Math.round(m.progress * 100)}%`}</span>
-          <div class="progress"><i style={{ width: `${m.progress * 100}%` }} /></div>
-        </div>
+        <div class="engine-over"><EngineCard compact /></div>
       )}
       <div class="vchips">
         {f && f.luma < DARK_LUMA && <Chip>Night</Chip>}

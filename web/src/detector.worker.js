@@ -52,39 +52,59 @@ async function embedTexts(texts) {
   return texts.map((_, i) => normalize(text_embeds.data.slice(i * d, (i + 1) * d)));
 }
 
-async function init() {
+const errText = (e) => String(e?.message ?? e).replace(/\s+/g, ' ').slice(0, 400);
+
+/// Loads with the requested engine, falling back GPU → CPU (threads) → CPU (1 thread).
+/// Every failure is recorded so the app can show exactly what went wrong.
+async function init({ engine = 'auto', threads: forced } = {}) {
   const progress = (p) => {
     if (p.status === 'progress') postMessage({ type: 'progress', file: p.file, loaded: p.loaded, total: p.total });
   };
   let gpu = false;
-  try {
-    gpu = !!(self.navigator?.gpu && (await navigator.gpu.requestAdapter()));
-  } catch { /* no WebGPU */ }
-  tok = await AutoTokenizer.from_pretrained(ID);
-  textModel = await CLIPTextModelWithProjection.from_pretrained(ID, { dtype: 'q8', device: 'wasm', progress_callback: progress });
-  proc = await AutoProcessor.from_pretrained(ID);
-  // The int8 vision model is broken (random labels); fp16 on GPU, fp32 on CPU.
-  try {
-    vision = await CLIPVisionModelWithProjection.from_pretrained(ID, {
-      dtype: gpu ? 'fp16' : 'fp32', device: gpu ? 'webgpu' : 'wasm', progress_callback: progress,
-    });
-  } catch (e) {
-    if (!gpu) throw e;
-    gpu = false;
-    vision = await CLIPVisionModelWithProjection.from_pretrained(ID, { dtype: 'fp32', device: 'wasm', progress_callback: progress });
+  if (engine !== 'cpu') {
+    try {
+      gpu = !!(self.navigator?.gpu && (await navigator.gpu.requestAdapter()));
+    } catch { /* no WebGPU */ }
   }
-
-  const keys = [], prompts = [];
-  for (const [k, ps] of Object.entries(CLASSES)) for (const p of ps) { keys.push(k); prompts.push(p); }
-  BACKGROUND.forEach((b, i) => { keys.push('bg' + i); prompts.push('a photo of ' + b); });
-  const embeds = await embedTexts(prompts);
-  classKeys = [...new Set(keys)];
-  classEmbeds = classKeys.map((k) => {
-    const sum = new Float32Array(embeds[0].length);
-    keys.forEach((kk, i) => { if (kk === k) embeds[i].forEach((v, j) => (sum[j] += v)); });
-    return normalize(sum);
-  });
-  postMessage({ type: 'ready', device: gpu ? 'webgpu' : 'wasm' });
+  const wasm = env.backends.onnx.wasm;
+  const threads = forced ?? (self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1);
+  const attempts = [
+    ...(gpu ? [{ device: 'webgpu', vision: 'fp16', text: 'fp32', threads }] : []),
+    ...(engine === 'gpu' ? [] : [{ device: 'wasm', vision: 'fp32', text: 'q8', threads }]),
+  ];
+  if (!attempts.length) throw new Error('WebGPU is not available in this browser. Choose AUTO or CPU.');
+  const failures = [];
+  tok = await AutoTokenizer.from_pretrained(ID);
+  proc = await AutoProcessor.from_pretrained(ID);
+  for (const a of attempts) {
+    try {
+      wasm.numThreads = a.threads;
+      postMessage({ type: 'attempt', device: a.device, threads: a.threads });
+      textModel = await CLIPTextModelWithProjection.from_pretrained(ID, { dtype: a.text, device: 'wasm', progress_callback: progress });
+      vision = await CLIPVisionModelWithProjection.from_pretrained(ID, { dtype: a.vision, device: a.device, progress_callback: progress });
+      // Prove it actually runs before declaring success.
+      await embedTexts(['a photo of a fox']);
+      const probe = new RawImage(new Uint8ClampedArray(64 * 64 * 4).fill(128), 64, 64, 4).rgb();
+      await vision(await proc([probe]));
+      const keys = [], prompts = [];
+      for (const [k, ps] of Object.entries(CLASSES)) for (const p of ps) { keys.push(k); prompts.push(p); }
+      BACKGROUND.forEach((b, i) => { keys.push('bg' + i); prompts.push('a photo of ' + b); });
+      const embeds = await embedTexts(prompts);
+      classKeys = [...new Set(keys)];
+      classEmbeds = classKeys.map((k) => {
+        const sum = new Float32Array(embeds[0].length);
+        keys.forEach((kk, i) => { if (kk === k) embeds[i].forEach((v, j) => (sum[j] += v)); });
+        return normalize(sum);
+      });
+      postMessage({ type: 'ready', device: a.device === 'webgpu' ? 'gpu' : `cpu×${a.threads}` });
+      return;
+    } catch (e) {
+      failures.push(`[${a.device}${a.device === 'wasm' ? ` ${a.threads}t` : ''}] ${errText(e)}`);
+      // ONNX Runtime can't re-initialise WASM after a failed start in the same worker.
+      if (a.device === 'wasm') break;
+    }
+  }
+  throw new Error(failures.join(' · '));
 }
 
 function classify(emb) {
@@ -123,7 +143,7 @@ let ready;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'init') {
-      ready ??= init();
+      ready ??= init(data.options);
       await ready;
     } else if (data.type === 'classify') {
       await ready;
