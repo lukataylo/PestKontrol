@@ -3,6 +3,7 @@
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
+import { handleAPI } from './api/cloud.js';
 
 const ROOT = join(import.meta.dirname, 'dist');
 const PORT = Number(process.env.PORT) || 8080;
@@ -19,7 +20,8 @@ function cacheControl(path) {
   return 'public, max-age=86400';
 }
 
-createServer((req, res) => {
+createServer(async (req, res) => {
+  if (await handleAPI(req, res)) return;
   let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   path = normalize(path).replace(/^(\.\.[/\\])+/, '');
   let file = join(ROOT, path);

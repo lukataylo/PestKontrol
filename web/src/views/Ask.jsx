@@ -5,6 +5,8 @@ import { search, ask, spot, parseRule, ruleWhen, range2, aiStatus } from '../rec
 import * as S from '../sentry.js';
 import { all, blobURL } from '../store.js';
 import { clock, stamp } from '../theme.js';
+import { cloudOn, askArchive, searchArchive, imageURL } from '../cloud.js';
+
 import { Card, Caption, Chip, Panel, Title, Toggle, Stepper, RoundButton } from '../ui.jsx';
 
 const SUGGESTIONS = [
@@ -42,11 +44,23 @@ export function Ask({ play }) {
     document.activeElement?.blur();
     try {
       const horizon = Math.max(S.recall.value.keepHours, 48);
+      const sightings = await all('sightings');
       if (isQuestion(t)) {
-        setAnswer(await ask(t, { horizonHours: horizon, threshold: S.tuning.value.threshold, sightings: await all('sightings') }));
+        const local = await ask(t, { horizonHours: horizon, threshold: S.tuning.value.threshold, sightings });
+        if (cloudOn()) {
+          const nv = await askArchive(t, local.log).catch(() => null);
+          if (nv?.text) { local.text = nv.text; local.usedAI = `NVIDIA ${nv.model.split('/')[1]}`; }
+        }
+        setAnswer(local);
       } else {
         const { clips } = await search(t, { horizonHours: horizon });
-        setAnswer({ text: clips.length ? `${clips.length} moment${clips.length === 1 ? '' : 's'} matched.` : `Nothing matched “${t}”.`, clips, usedAI: false });
+        const archive = cloudOn() ? await searchArchive(t).then((r) => r.results.filter((x) => x.score > 0.05)).catch(() => []) : [];
+        setAnswer({
+          text: clips.length || archive.length
+            ? `${clips.length} moment${clips.length === 1 ? '' : 's'} on this phone${cloudOn() ? `, ${archive.length} in the VAST archive` : ''}.`
+            : `Nothing matched “${t}”.`,
+          clips, archive, usedAI: false,
+        });
       }
     } finally {
       setBusy(false);
@@ -105,7 +119,23 @@ export function Ask({ play }) {
                   {answer.clips.map((c) => <Tile key={c.start} clip={c} onClick={() => play(c)} />)}
                 </div>
               )}
-              <Caption>{answer.usedAI ? 'Answered by the on-device model' : 'Matched on this device'}</Caption>
+              {answer.archive?.length > 0 && (
+                <>
+                  <Caption>VAST archive · all cameras · NVIDIA Nemotron search</Caption>
+                  <div class="clipgrid">
+                    {answer.archive.map((e) => (
+                      <div class="tile" key={e.key}>
+                        <img src={imageURL(e.image)} alt="" />
+                        <div class="meta">
+                          <DotText text={e.species} pitch={1.9} color="#ffffff" />
+                          <span style={{ color: 'rgba(255,255,255,0.85)' }}>{e.device} · {clock(new Date(e.at))}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <Caption>{typeof answer.usedAI === 'string' ? `Answered by ${answer.usedAI}` : answer.usedAI ? 'Answered by the on-device model' : 'Matched on this device'}</Caption>
             </div>
           </Panel>
         )}

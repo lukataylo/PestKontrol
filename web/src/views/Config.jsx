@@ -6,6 +6,7 @@ import * as S from '../sentry.js';
 import { THEMES, theme, slasher, load, save, grainURL } from '../theme.js';
 import { Caption, Card, Panel, Stepper, Title, Toggle } from '../ui.jsx';
 import { EngineCard } from './Engine.jsx';
+import { CloudCard } from './Cloud.jsx';
 
 /// Pick a pest's sound: every option with a one-line description and a preview.
 export function SoundSheet({ species, close }) {
@@ -241,6 +242,7 @@ export function Config() {
         </Card>
 
         <Card><EngineCard /></Card>
+        <Card seed={88}><CloudCard /></Card>
         <Card>
           <div class="row">
             <Glyph name="lock" pitch={3} />

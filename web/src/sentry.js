@@ -3,7 +3,8 @@
 import { signal, computed, effect } from '@preact/signals';
 import { Detector, DARK_LUMA, PESTS, model } from './detector.js';
 import { Recorder } from './recorder.js';
-import { add, pruneBefore, persist } from './store.js';
+import { add, put, pruneBefore, persist } from './store.js';
+import { cloudOn, cloud, sendEvent } from './cloud.js';
 import { play, unlockAudio } from './sound.js';
 import { ruleActive } from './recall.js';
 import { load, save } from './theme.js';
@@ -195,20 +196,45 @@ function ingest(f) {
   streak = 0;
   cooldownUntil = now + t.cooldown * 1000;
   holdUntil = now + 3000;
-  let outcome, pattern = null;
-  if (!armed.value) {
-    outcome = 'logged';
-    status.value = { kind: 'logged', species: sp };
-  } else if (isQuiet()) {
-    outcome = 'quiet';
-    status.value = { kind: 'quiet', species: sp };
-  } else {
-    pattern = play(patternFor(sp), t.gain);
-    outcome = 'fired';
-    status.value = { kind: 'firing', species: sp, pattern };
+  confirmVisit(sp, f, t);
+}
+
+/// A confirmed visit: deter (optionally only once NVIDIA agrees), log, archive to VAST.
+async function confirmVisit(sp, f, t) {
+  const record = { at: f.at, species: sp, confidence: f.confidence, outcome: 'logged', pattern: null, snapshot: f.snapshot ?? null, dark: f.luma < DARK_LUMA };
+  const wantsSound = armed.value && !isQuiet();
+  let check = null;
+
+  if (wantsSound && cloudOn() && cloud.value.verifyFirst && sp !== 'movement') {
+    status.value = { kind: 'checking', species: sp };
+    check = await sendEvent({ ...record, outcome: 'checking' }, 6000).catch(() => null);
+    if (check?.nvidia && !check.nvidia.error && !check.nvidia.present) {
+      record.outcome = 'vetoed';
+      status.value = { kind: 'vetoed', species: sp, saw: check.nvidia.animal };
+      holdUntil = Date.now() + 4000;
+    }
   }
-  add('sightings', { at: f.at, species: sp, confidence: f.confidence, outcome, pattern, snapshot: f.snapshot ?? null, dark: f.luma < DARK_LUMA });
-  runRules(sp.toUpperCase(), `${Math.round(f.confidence * 100)}%`, (tr) => tr.type === 'pest' && (!tr.species.length || tr.species.includes(sp)), sp, f.confidence);
+
+  if (record.outcome !== 'vetoed') {
+    if (!armed.value) {
+      status.value = { kind: 'logged', species: sp };
+    } else if (isQuiet()) {
+      record.outcome = 'quiet';
+      status.value = { kind: 'quiet', species: sp };
+    } else {
+      record.pattern = play(patternFor(sp), t.gain);
+      record.outcome = 'fired';
+      status.value = { kind: 'firing', species: sp, pattern: record.pattern };
+    }
+    runRules(sp.toUpperCase(), `${Math.round(f.confidence * 100)}%`, (tr) => tr.type === 'pest' && (!tr.species.length || tr.species.includes(sp)), sp, f.confidence);
+  }
+
+  if (check) record.cloud = { ...check.nvidia, stored: check.stored, key: check.key };
+  const id = await add('sightings', record);
+  if (!check && cloudOn() && sp !== 'movement') {
+    sendEvent(record).then((r) => r && put('sightings', { ...record, id, cloud: { ...r.nvidia, stored: r.stored, key: r.key } }))
+      .catch((e) => put('sightings', { ...record, id, cloud: { error: e.message } }));
+  }
 }
 
 /// The searchable timeline: every ~4 s when quiet, every ~1 s when busy.
@@ -295,6 +321,8 @@ export function mood(st, isArmed, slasherTheme) {
     case 'firing': return 'angry';
     case 'logged': case 'quiet': return 'surprised';
     case 'cooldown': return 'smug';
+    case 'checking': return 'suspicious';
+    case 'vetoed': return 'happy';
     case 'held': return 'happy';
     case 'loading': return 'sleepy';
   }
@@ -315,6 +343,8 @@ export function line(st, isArmed, slasherTheme) {
       case 'logged': return `${S(st.species)} spotted`;
       case 'quiet': return `${S(st.species)}. Quiet hours.`;
       case 'cooldown': return "They'll be back";
+      case 'checking': return 'Asking NVIDIA...';
+      case 'vetoed': return `False alarm: ${S(st.saw)}`;
       case 'held': return st.who === 'person' ? 'Human. Holding fire.' : `${S(st.who)}. Holding fire.`;
     }
   }
@@ -329,6 +359,8 @@ export function line(st, isArmed, slasherTheme) {
     case 'logged': return `${S(st.species)}! Logged it.`;
     case 'quiet': return `${S(st.species)}. Shh, quiet hours.`;
     case 'cooldown': return "That told 'em.";
+    case 'checking': return 'Checking with NVIDIA...';
+    case 'vetoed': return `Not a ${S(st.species)}. Saw ${S(st.saw)}.`;
     case 'held': return st.who === 'person' ? 'Hi human. Staying quiet.' : `Hi ${S(st.who)}. No noise.`;
   }
   return '';

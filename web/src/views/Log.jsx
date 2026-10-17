@@ -72,8 +72,12 @@ export function Log() {
   );
 }
 
-const Outcome = ({ s }) =>
-  s.outcome === 'fired' ? <Chip kind="solid">{s.pattern}</Chip> : <Chip>{s.outcome === 'quiet' ? 'Quiet' : 'Logged'}</Chip>;
+const Outcome = ({ s }) => (
+  <div class="stack" style={{ gap: '6px', alignItems: 'flex-end' }}>
+    {s.outcome === 'fired' ? <Chip kind="solid">{s.pattern}</Chip> : <Chip>{{ quiet: 'Quiet', vetoed: 'Held' }[s.outcome] ?? 'Logged'}</Chip>}
+    {s.cloud && !s.cloud.error && <Chip>{s.cloud.present ? 'NVIDIA ✓' : 'NVIDIA ✗'}</Chip>}
+  </div>
+);
 
 function HourChart({ hours }) {
   const ref = useRef();
@@ -113,6 +117,17 @@ function Detail({ s, close }) {
             <div class="row" key={k}><Caption>{k}</Caption><span class="spacer" /><span class="text" style={{ textTransform: 'uppercase' }}>{v}</span></div>
           ))}
         </Card>
+        {s.cloud && (
+          <Card title="NVIDIA · VAST">
+            {s.cloud.error ? <span class="blurb">Cloud check failed: {s.cloud.error}</span> : (
+              <>
+                <div class="row"><Caption>Verdict</Caption><span class="spacer" /><span class="text">{s.cloud.present ? `CONFIRMED ${s.species.toUpperCase()}` : `NOT A ${s.species.toUpperCase()} · SAW ${String(s.cloud.animal).toUpperCase()}`}</span></div>
+                <p class="text" style={{ margin: 0 }}>{s.cloud.description}</p>
+                <Caption>{s.cloud.model} · archived to {s.cloud.stored}</Caption>
+              </>
+            )}
+          </Card>
+        )}
         <button class="primary" style={{ background: 'none', border: '1px solid var(--red)' }} onClick={() => { remove('sightings', s.id); close(); }}>
           <Glyph name="trash" pitch={2.4} color="var(--red)" /><DotText text="DELETE" pitch={2.6} color={pal().red} />
         </button>

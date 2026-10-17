@@ -171,7 +171,7 @@ export async function ask(question, { horizonHours = 24, threshold = 0.45, sight
 
   const ai = await browserAI(question, log.join('\n'));
   const text = ai ?? summary(relevant.length || !subs.length ? relevant : [], scared, from, to, subs);
-  return { text, clips: relevant.slice(0, 8), usedAI: !!ai, window: [from, to] };
+  return { text, clips: relevant.slice(0, 8), usedAI: !!ai, window: [from, to], log: log.join('\n') };
 }
 
 function summary(events, scared, from, to, subs) {

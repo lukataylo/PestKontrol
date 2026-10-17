@@ -18,6 +18,19 @@ npm run preview                          # production build + server.js
 railway up --service shoo-web            # deploy (project: shoo)
 ```
 
+## Cloud Boost — VAST + NVIDIA (opt-in)
+
+Detection always runs on the device. If you switch on **Cloud Boost** (Config, with the server's cloud key), each confirmed visit sends one snapshot — never live video — to `web/api/`:
+
+- **NVIDIA Cosmos Reason 2** (`nvidia/cosmos-reason2-8b`) double-checks it ("is that really a fox?") and describes the scene. It can veto the scare before it plays (*only scare once NVIDIA confirms*).
+- **NVIDIA Nemotron embed VL** (`nvidia/llama-nemotron-embed-vl-1b-v2`) embeds the snapshot, so text queries search images across every camera.
+- **NVIDIA Nemotron** (`nvidia/nemotron-3.5-super-vl-120b-a12b`) answers Ask questions over the whole archive.
+- **VAST** stores everything at `shoo/events/<day>/<camera>/<time>_<species>.{jpg,json}`, over S3 or a mounted VAST view, so VAST DataBase and notebooks can query it directly.
+
+This follows the NVIDIA Video Search & Summarization pattern: a vision model captions, embeddings retrieve, an LLM summarises.
+
+Server variables: `SHOO_CLOUD_TOKEN`, `NVIDIA_API_KEY`, then either `VAST_S3_ENDPOINT` + `VAST_ACCESS_KEY` + `VAST_SECRET_KEY` + `VAST_BUCKET`, or `VAST_DIR`.
+
 ## Run
 
 ```sh
