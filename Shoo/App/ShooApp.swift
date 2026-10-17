@@ -12,6 +12,6 @@ struct ShooApp: App {
                 .preferredColorScheme(.dark)
                 .statusBarHidden()
         }
-        .modelContainer(for: Sighting.self)
+        .modelContainer(for: [Sighting.self, Moment.self])
     }
 }

@@ -20,8 +20,15 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>SHOO watches for pests on-device. Video never leaves this phone.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>SHOO sends rule webhooks to devices you name, like Home Assistant.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

@@ -24,6 +24,9 @@ targets:
         UIUserInterfaceStyle: Dark
         UIStatusBarHidden: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSLocalNetworkUsageDescription: SHOO sends rule webhooks to devices you name, like Home Assistant.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lukadadiani.shoo
@@ -32,3 +35,4 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 5QC5886P5V
+        OTHER_LDFLAGS: ["-weak_framework", "FoundationModels"]

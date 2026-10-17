@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import Observation
+import UserNotifications
 
 /// What the sentry is doing right now. Drives the bot's face and voice.
 enum SentryStatus: Equatable {
@@ -35,10 +36,21 @@ final class Sentry {
     var status: SentryStatus = .offline
     var thermal: ProcessInfo.ThermalState = .nominal
     var volumeLow = false
+    var recall = RecallSettings.load() {
+        didSet {
+            recall.save()
+            recorder.enabled = recall.record
+            recorder.keepHours = recall.keepHours
+        }
+    }
+    var rules = RuleStore.load() { didSet { RuleStore.save(rules) } }
+    var firings: [RuleFiring] = []
     let engineName: String
 
     let camera = CameraService()
     let previewTap = PreviewTap()
+    let recorder = VideoRecorder()
+    private let indexer = Indexer()
     private let pipeline: FramePipeline
     private let sound = SoundEngine()
     @ObservationIgnored private var context: ModelContext?
@@ -48,6 +60,7 @@ final class Sentry {
     @ObservationIgnored private var holdStatusUntil = Date.distantPast
     @ObservationIgnored private var thermalObserver: NSObjectProtocol?
     @ObservationIgnored private var volumeObserver: NSKeyValueObservation?
+    @ObservationIgnored private var ruleLastFired: [UUID: Date] = [:]
 
     init() {
         let detector = DetectorFactory.make()
@@ -55,19 +68,30 @@ final class Sentry {
         pipeline = FramePipeline(detector: detector)
         pipeline.snapshotThreshold = Float(settings.tuning.threshold) * 0.8
         pipeline.onResult = { [weak self] frame in self?.ingest(frame) }
-        Self.wire(camera, to: pipeline, tap: previewTap)
+        recorder.enabled = recall.record
+        recorder.keepHours = recall.keepHours
+        Self.wire(camera, to: pipeline, tap: previewTap, recorder: recorder)
+        indexer.onCaption = { [weak self] caption in
+            self?.runRules(subject: "Scene", detail: caption) { trigger in
+                if case .keyword(let k) = trigger { return caption.lowercased().contains(k) }
+                return false
+            }
+        }
+        UNUserNotificationCenter.current().delegate = ForegroundNotifications.shared
     }
 
     // Built outside the main actor: frames arrive on the camera queue.
-    nonisolated private static func wire(_ camera: CameraService, to pipeline: FramePipeline, tap: PreviewTap) {
-        camera.onBuffer = { buffer in
+    nonisolated private static func wire(_ camera: CameraService, to pipeline: FramePipeline, tap: PreviewTap, recorder: VideoRecorder) {
+        camera.onBuffer = { buffer, time in
             pipeline.handle(buffer)
             tap.push(buffer)
+            recorder.append(buffer, at: time)
         }
     }
 
     func attach(_ context: ModelContext) {
         self.context = context
+        indexer.attach(context)
     }
 
     func start() async {
@@ -96,6 +120,10 @@ final class Sentry {
         let now = Date()
         let tuning = settings.tuning
         let threshold = Float(tuning.threshold)
+
+        indexer.ingest(f, threshold: threshold, indexHours: recall.indexHours,
+                       allowCaptions: thermal == .nominal || thermal == .fair)
+        triggerRules(for: f)
 
         // A clear person always wins. Anything else only wins if it outranks the pest —
         // Apple's pet detector calls foxes "Dog" (0.67 on a clear fox photo), and the
@@ -145,6 +173,68 @@ final class Sentry {
             status = .firing(species, voice)
         }
         record(species, f, outcome, played)
+        runRules(subject: species.code.capitalized, detail: "\(Int(f.confidence * 100))%", species: species, confidence: f.confidence) { trigger in
+            if case .pest(let list) = trigger { return list.isEmpty || list.contains(species) }
+            return false
+        }
+    }
+
+    // MARK: - Rules
+
+    /// Frame-level triggers. Pest rules fire from the confirmed-visit path above.
+    private func triggerRules(for f: DetectionFrame) {
+        if f.guarded == .person, f.guardedConfidence >= 0.5 {
+            runRules(subject: "Person", detail: "\(Int(f.guardedConfidence * 100))%") { $0 == .person }
+        } else if let g = f.guarded, g != .person, f.guardedConfidence >= 0.5, f.guardedConfidence >= f.confidence {
+            runRules(subject: g.code.capitalized, detail: "friend") { $0 == .friend }
+        }
+        if f.moving {
+            runRules(subject: "Movement", detail: "") { $0 == .motion }
+        }
+    }
+
+    private func runRules(subject: String, detail: String, species: Species? = nil, confidence: Float = 0,
+                          matching: (Rule.Trigger) -> Bool) {
+        let now = Date()
+        for rule in rules where rule.active(at: now) && matching(rule.trigger) {
+            if let last = ruleLastFired[rule.id], now.timeIntervalSince(last) < rule.cooldown { continue }
+            ruleLastFired[rule.id] = now
+            var did: [String] = []
+            for action in rule.actions {
+                switch action {
+                case .deter:
+                    let voice = sound.play(species.map { settings.pattern(for: $0) } ?? .mix, gain: Float(settings.tuning.gain))
+                    did.append(voice.code)
+                case .lamp:
+                    strobe()
+                    did.append("LAMP")
+                case .notify:
+                    Notifier.send("SHOO · \(subject)", detail.isEmpty ? rule.text : "\(detail) — \(rule.text)")
+                    did.append("NOTIFY")
+                case .webhook:
+                    guard let url = rule.webhook else { continue }
+                    Notifier.webhook(url, payload: [
+                        "event": subject.lowercased(), "detail": detail, "rule": rule.text,
+                        "confidence": Double(confidence), "time": ISO8601DateFormatter().string(from: now),
+                    ])
+                    did.append("WEBHOOK")
+                }
+            }
+            firings.insert(RuleFiring(date: now, rule: rule.text, what: "\(subject) → \(did.joined(separator: " · "))"), at: 0)
+            if firings.count > 30 { firings.removeLast() }
+        }
+    }
+
+    /// Flash the torch a few times, then put it back how it was.
+    private func strobe() {
+        let restore = torch
+        Task {
+            for i in 0..<8 {
+                camera.setTorch(i.isMultiple(of: 2))
+                try? await Task.sleep(for: .milliseconds(220))
+            }
+            camera.setTorch(restore)
+        }
     }
 
     private func restingStatus(_ now: Date, _ f: DetectionFrame) -> SentryStatus {

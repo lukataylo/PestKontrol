@@ -20,6 +20,15 @@ The Watch screen is led by a 29×13 dot-matrix bot face. It has eight moods (idl
 
 The user chooses **GENTLE / STEADY / FIERCE**. Each one sets four numbers: certainty, patience, rest and loudness (`Tuning` in `SentrySettings.swift`). *Fine-tune* in Config edits those numbers directly. The mode switches to CUSTOM, and back to a preset if the numbers match one again.
 
+## Ask tab — search, ask, spot, act
+
+Everything runs on the phone. The on-device language model (Apple Intelligence, iOS 26+, plus vision on iOS 27) makes it smarter. Without it, the tab falls back to keyword logic.
+
+- **Search hours of footage.** Recording is rolling 5-minute HEVC segments (about 0.5 GB per hour; keep 2–72 h). An index stores labels, motion and thumbnails every 1–4 s, plus a vision caption whenever something is happening. Type "every pigeon today" and tap a result to play it.
+- **Ask what happened.** For example "What happened overnight?" The question sets a time window and keywords, and the model answers from the activity log and key frames.
+- **Spotted.** Visits, people, pets, unexplained movement and light changes, built from the index.
+- **When → then rules.** For example "If a fox comes at night, flash the lamp and tell me." Actions: DETER, LAMP, NOTIFY, WEBHOOK (POST JSON to a URL you name, such as Home Assistant).
+
 ## How it decides
 
 1. The camera runs at 720p, about 15 fps. Detection runs about 4 fps and backs off when the phone gets hot.

@@ -2,12 +2,13 @@ import SwiftUI
 import SwiftData
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case watch, log, config
+    case watch, ask, log, config
     var id: String { rawValue }
 
     var icon: [String] {
         switch self {
         case .watch: Glyphs.eye
+        case .ask: Glyphs.search
         case .log: Glyphs.list
         case .config: Glyphs.sliders
         }
@@ -36,6 +37,7 @@ struct RootView: View {
                     Group {
                         switch tab {
                         case .watch: WatchView()
+                        case .ask: AskView()
                         case .log: LogView()
                         case .config: ConfigView()
                         }

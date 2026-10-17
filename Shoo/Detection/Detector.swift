@@ -16,6 +16,8 @@ struct DetectionFrame {
     var topLabels: [(String, Float)] = []
     var luma: Float = 0.5
     var snapshot: Data?
+    /// Small frame for the search index — taken every ~10 s, or every second while busy.
+    var thumbnail: Data?
     var timestamp = Date()
 }
 

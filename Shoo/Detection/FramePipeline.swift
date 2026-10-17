@@ -23,6 +23,7 @@ final class FramePipeline {
     private var _snapshotThreshold: Float = 0.36
     private var busy = false
     private var lastRun: CFTimeInterval = 0
+    private var lastThumb: CFTimeInterval = 0   // vision queue only
 
     init(detector: PestDetector) {
         self.detector = detector
@@ -45,17 +46,22 @@ final class FramePipeline {
             if frame.confidence >= snapshotThreshold {
                 frame.snapshot = jpeg(buffer)
             }
+            let active = frame.moving || frame.confidence >= snapshotThreshold * 0.5 || frame.guardedConfidence >= 0.4
+            if now - lastThumb >= (active ? 1 : 10) {
+                frame.thumbnail = jpeg(buffer, scale: 0.45, quality: 0.5)
+                lastThumb = now
+            }
             lock.withLock { busy = false }
             DispatchQueue.main.async { self.onResult?(frame) }
         }
     }
 
-    private func jpeg(_ buffer: CVPixelBuffer) -> Data? {
-        let image = CIImage(cvPixelBuffer: buffer).transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+    private func jpeg(_ buffer: CVPixelBuffer, scale: CGFloat = 0.5, quality: CGFloat = 0.6) -> Data? {
+        let image = CIImage(cvPixelBuffer: buffer).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         return ci.jpegRepresentation(
             of: image,
             colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.6]
+            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: quality]
         )
     }
 

@@ -4,7 +4,7 @@ import SwiftUI
 /// Back wide camera, 720p portrait, ~15 fps. Delivers pixel buffers on its own queue.
 final class CameraService: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     let session = AVCaptureSession()
-    var onBuffer: ((CVPixelBuffer) -> Void)?
+    var onBuffer: ((CVPixelBuffer, CMTime) -> Void)?
 
     private let queue = DispatchQueue(label: "shoo.camera")
     private var device: AVCaptureDevice?
@@ -77,7 +77,7 @@ final class CameraService: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        onBuffer?(buffer)
+        onBuffer?(buffer, CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
 }
 
